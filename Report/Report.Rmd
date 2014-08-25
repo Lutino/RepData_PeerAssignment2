@@ -1,0 +1,173 @@
+```{r global_options, include=FALSE}
+library(knitr)
+library(car)
+library(stringr)
+library(ggplot2)
+opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figures/',
+               echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE)
+```
+---
+title: "Storms-Ecomomic And Public Health Impact In The USA."
+author:
+- affiliation: iNTELLIGENTIANALYTICs
+  email: patrickleugue@gmail.com
+  name: Patrick Leugue
+date: "Monday, August 19, 2014"
+output: pdf_document
+bibliography: sigproc.bib
+subtitle: An exploration of NOAA storm data for the cost analysis of the differents
+  types of storms.
+abstract: "As early as 1826, data on severe weather occurences has been gathered and
+  recorded. That information gathering task has been continued by the US National
+  Oceanographic Atmospheric Agency (NOOA,) which uses cutting edge technology to collects,
+  process, and save data about storms, from thousands of sensors disseminated all
+  over the US.  All the data is made available to the broader public via it's website.
+  \n\nThe data reveals that Tornadoes, Thunderstorm Winds and Flood have the greatest
+  economic impact with approximately 10 Billions in property and crop damages per
+  year. They represents an equally important public health treat with an estimated
+  6000 peoples killed or injured every year. The findinds in this paper were obtained
+  by exploratory analyses of NOAA's Storm information from 1950 to November 2011.\n"
+---
+
+
+
+# Introduction 
+The United States are affected every year by natural disasters caused by storms. The US goverment spends approximately billions of dollars yearly to support and indemnify the victims of natural disasters. In 2011 and 2012 alone, damages from storms were evaluated at 188 billions dollars[@Weiss2013] and 1107 fatalities were officially recorded.
+
+Every year, as it has been since 1826, NOAA(National Oceanographic Athmospheric Agency) collect and compiles data about storms-related occurences on the US soil. The data includes an estimation of property and crop damages, as well as a count of fatalities and injuries per event. All events are categorized by their type and additional location information is provided. 
+
+To determine what type of storm event has the greatest economical and public health impact, storm data from 1950 to November 2011 is obtained from NOAA, and Exploratory analysis is conducted on the data.
+
+# Data Processing
+Data analysis and processing is conducted using the free and open source R statistical analysis toolset.The environment consist of RStudio Version 0.98.953 and the following R parameters:
+```{r}
+R.Version()
+```
+
+To answer the two questions about the effect of storm events on public health and the economy, storm data from 1950 to November 2011 is obtained from [here](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) 
+```{r}
+#  Link to the compressed data file on website
+#fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+#download.file(fileURL, destfile="storm.bz2")
+```
+decompressed into the current folder,
+```{r}
+#require(R.utils)
+#bunzip2("./storm.bz2")
+``` 
+and the raw data is imported into the R environment
+```{r cache=TRUE}
+rawdata <- read.csv("repdata-data-StormData.csv")
+```
+
+A decription of imported data is available in the [Storm Data Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf). 
+A peek at the data structure should help identify all the attributes described in the document above.
+```{r}
+str(rawdata)
+```
+Couple of inconsistencies ought to be noted here. The STATE attribute is being reported as a factor with 72 levels (denoting 72 states.) In addition, event types (EVTYPE) consist of 985 levels, which is wildly above the 40 types of events decribed in page 6 of the storm data documentation. These denotes for a data that is not quite tidy.
+
+Before engaging in any data correction however, the raw data can be subsetted to contain only attributes that matter for upcomming analysis. Those attributes are identified below and can be aggregated by:
+* Event type and location
+        + STATE
+        + EVTYPE (Event Type)
+* Economic impacts indicators
+        + PROPDMG(property damage),  
+        + PROPDMGEXP(Property damage magnitude) ,
+        + CROPDMG(crop Damage), 
+        + and CROPDMGEXP(crop damage magnitude),
+* Human health impact indicators
+        + FATALITIES, 
+        + and INJURIES
+```{r}
+rawData <- rawdata[, c("STATE","EVTYPE","PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP","FATALITIES", "INJURIES")] 
+```
+Next, looking at unique values of STATE and EVTYPE in our new data frame, an observations is made that there are duplicates values that are differents only by the case of the letters. As such, factor levels "Hurricane" and "HURRICANE" are deemed to be differents factors though they indicate the same event. To solve this issue, all factors will be uppercased.
+```{r}
+# transform factor to character, to uppercase,
+# trim whitespaces, and convert back as a factor
+rawData$STATE <- as.factor(toupper(str_trim(as.character(rawData$STATE))))
+rawData$EVTYPE<- as.factor(toupper(str_trim(as.character(rawData$EVTYPE))))
+```
+Peeking into the rawData, `r str(rawData)` we notice that though the number of STATE factors have not changed, EVTYPE factor has been reduced from 985 categories to 890. Further processing might be needed to reduce the number of factor to a reasonable number. <br/> Let's reconvert EVTYPE into a string, 
+```{r}
+rawData$EVTYPE<- as.character(rawData$EVTYPE)
+```
+extract and sorting event types as reported by rawData.
+```{r}
+eventTypes<- unique(rawData$EVTYPE)
+eventTypes<- eventTypes[order(eventTypes)]
+rawData$EVTYPE<- as.factor(rawData$EVTYPE)
+```
+Peeking in the data again, we notice spelling errors. For example, items 10 and 11, item 12 and 13 describe respectively the same event types. Mispelled items would lead to additional unnecessary factors. 
+
+The magnitude fields PROPDMGEXP and CROPDMGEXP are reported in the data as characters
+```{r}
+levels(rawData$PROPDMGEXP)
+levels(rawData$CROPDMGEXP)
+```
+the letters represent exponents of the values. Here again, because of character cases, duplicate factors are included and must be corrected.
+```{r}
+rawData$PROPDMGEXP <- as.factor(toupper(str_trim(as.character(rawData$PROPDMGEXP))))
+rawData$CROPDMGEXP <- as.factor(toupper(str_trim(as.character(rawData$CROPDMGEXP))))
+```
+For example, K will denote an order of magnitude of 10^3^, B for 10^6^, 8 for 10^8^. To determine the real value of the damage for processing purpose, a transformation is effected to create additional columns in the data: PROPDMGPOWERofTEN, CROPDMGPOWERofTEN, PROPDMGDOLLAR , CROPDMGDOLLAR, DAMAGEDOLLAR, TOTALFATALITIES 
+```{r}
+powerOfTen <- "'H'=100;'K'=1000;'M'=1000000;'B'=1000000000;'-'=0;'?'=0;'+'=0;'0'=1;'1'=10;'2'=100;'3'=1000;'4'=10000;'5'=100000;'6'=1000000;'7'=10000000;'8'=100000000"
+
+rawData$PROPDMGPOWERofTEN <- as.numeric(recode(rawData$PROPDMGEXP,powerOfTen))
+rawData$CROPDMGPOWERofTEN <- as.numeric(recode(rawData$CROPDMGEXP,powerOfTen))
+
+
+rawData$PROPDMGDOLLAR <-  rawData$PROPDMG * rawData$PROPDMGPOWERofTEN
+rawData$CROPDMGDOLLAR <-  rawData$CROPDMG * rawData$CROPDMGPOWERofTEN
+
+rawData$DAMAGEDOLLAR <-  rawData$CROPDMGDOLLAR + rawData$PROPDMGDOLLAR
+rawData$TOTALFATALITIES <-  rawData$FATALITIES + rawData$INJURIES
+
+```
+
+The data might require extensive cleaning and retransformation to be fully usable, however analysis will be performed on the data in its current status.
+
+# Results
+To measure the effect of storms on public health, the total number of fatalities and injuries is calculated per storm type. The human cost is evaluated as follow:
+```{r}
+HumanCost <- tapply(rawData$DAMAGEDOLLAR, rawData$EVTYPE, sum)
+HumanCost <- HumanCost[order(HumanCost, decreasing = T)][1:5]
+```
+The economic effect of storms is measured by calculating the total amount of damage both to crops and properties as follows:
+```{r}
+DamageCost <- tapply(rawData$CROPDMGDOLLAR, rawData$EVTYPE, sum)
+DamageCost <- DamageCost[order(DamageCost, decreasing = T)][1:5]
+```
+and the results can be plotted. 
+
+The firt plot is that of the five most important storm types and their effect on human cost. 
+```{r}
+pie(HumanCost)
+```
+The following plot is that of the effect of the five most important storm types on the economy
+```{r}
+pie(DamageCost)
+```
+
+
+# Conclusion
+Accross the US, tornadoes have the greatest human impact with greater numbers of fatalities and injuries recorded. On the other hand, damages to crop and properties are overwhelmingly created by hail more than any other type of storm. 
+
+# References
+
+---
+references:
+- id: Weiss2013
+  title: Disastrous Spending: Federal Disaster-Relief Expenditures Rise amid More Extreme Weather
+  author: 
+  - family: Weiss
+    given: Daniel
+  type: article
+  publisher: Center for American Progress.
+  issued:
+    year: 2013
+    month: 4
+...
+
